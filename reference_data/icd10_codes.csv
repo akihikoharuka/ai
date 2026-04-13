@@ -1,0 +1,51 @@
+code,description
+E11.42,Type 2 diabetes mellitus with diabetic polyneuropathy
+E11.36,Type 2 diabetes mellitus with diabetic cataract
+E11.21,Type 2 diabetes mellitus with diabetic nephropathy
+E11.44,Type 2 diabetes mellitus with diabetic amyotrophy
+E11.41,Type 2 diabetes mellitus with diabetic mononeuropathy
+E11.620,Type 2 diabetes mellitus with diabetic dermatitis
+E11.39,Type 2 diabetes mellitus with other diabetic ophthalmic complication
+E10.42,Type 1 diabetes mellitus with diabetic polyneuropathy
+E10.36,Type 1 diabetes mellitus with diabetic cataract
+E10.21,Type 1 diabetes mellitus with diabetic nephropathy
+E10.44,Type 1 diabetes mellitus with diabetic amyotrophy
+E10.620,Type 1 diabetes mellitus with diabetic dermatitis
+I10,Essential (primary) hypertension
+I15.0,Renovascular hypertension
+I15.8,Other secondary hypertension
+I15.9,"Secondary hypertension, unspecified"
+I16.0,Hypertensive urgency
+I16.1,Hypertensive emergency
+I16.9,"Hypertensive crisis, unspecified"
+I67.4,Hypertensive encephalopathy
+I27.0,Primary pulmonary hypertension
+I27.20,"Pulmonary hypertension, unspecified"
+J00,Acute nasopharyngitis [common cold]
+J45.20,"Mild intermittent asthma, uncomplicated"
+J45.21,Mild intermittent asthma with (acute) exacerbation
+J45.30,"Mild persistent asthma, uncomplicated"
+J45.31,Mild persistent asthma with (acute) exacerbation
+J45.40,"Moderate persistent asthma, uncomplicated"
+J45.41,Moderate persistent asthma with (acute) exacerbation
+J45.50,"Severe persistent asthma, uncomplicated"
+J45.51,Severe persistent asthma with (acute) exacerbation
+J45.909,"Unspecified asthma, uncomplicated"
+J45.991,Cough variant asthma
+K76.6,Portal hypertension
+G93.2,Benign intracranial hypertension
+R03.0,"Elevated blood-pressure reading, without diagnosis of hypertension"
+Z71.1,Person with feared health complaint in whom no diagnosis is made
+M54.5,Low back pain
+M79.3,Panniculitis unspecified
+R10.9,"Unspecified abdominal pain, unspecified site"
+R50.9,"Fever, unspecified"
+R05.9,"Cough, unspecified"
+J06.9,"Acute upper respiratory infection, unspecified"
+J18.9,"Pneumonia, unspecified organism"
+J20.9,"Acute bronchitis, unspecified"
+N39.0,Urinary tract infection site not specified
+K21.0,Gastro-esophageal reflux disease with esophagitis
+K21.9,Gastro-esophageal reflux disease without esophagitis
+F32.9,"Major depressive disorder, single episode, unspecified"
+F41.1,Generalized anxiety disorder
