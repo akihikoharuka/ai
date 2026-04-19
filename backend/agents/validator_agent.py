@@ -207,6 +207,7 @@ def validate(state: SyntheticDataState) -> dict:
         return {
             "validation_result": validation_result,
             "script_error": failure_summary,
+            "script_retry_count": state.get("script_retry_count", 0) + 1,
             "phase": Phase.GENERATING_SCRIPT,
             "messages": [AIMessage(content=f"Validation issues found. Fixing script...\n\n{failure_summary}")],
         }

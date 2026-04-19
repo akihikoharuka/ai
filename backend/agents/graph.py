@@ -10,7 +10,6 @@ from langgraph.graph import END, StateGraph
 from backend.agents.brain_agent import analyze_schema, parse_schema, present_summary
 from backend.agents.python_agent import (
     generate_script,
-    present_preview,
     run_full_generation,
     run_preview,
 )
@@ -54,21 +53,17 @@ def route_after_script(
 
 def route_after_preview_run(
     state: SyntheticDataState,
-) -> Literal["present_preview", "generate_script", "__end__"]:
-    """Route after running preview."""
+) -> Literal["run_full_generation", "generate_script", "__end__"]:
+    """Route after running preview.
+
+    Preview is now decoupled: after a successful preview run we go straight to
+    full generation without a human checkpoint. The preview data stays in state
+    so the UI can display it alongside the full run.
+    """
     if state.get("phase") == Phase.ERROR:
         return END
     if state.get("phase") == Phase.GENERATING_SCRIPT:
         return "generate_script"  # Script failed, self-heal
-    return "present_preview"
-
-
-def route_after_preview_approval(
-    state: SyntheticDataState,
-) -> Literal["run_full_generation", "generate_script"]:
-    """Route after user reviews preview."""
-    if state.get("phase") == Phase.GENERATING_SCRIPT:
-        return "generate_script"  # User wants changes
     return "run_full_generation"
 
 
@@ -105,7 +100,6 @@ def build_graph() -> StateGraph:
     graph.add_node("present_summary", present_summary)
     graph.add_node("generate_script", generate_script)
     graph.add_node("run_preview", run_preview)
-    graph.add_node("present_preview", present_preview)
     graph.add_node("run_full_generation", run_full_generation)
     graph.add_node("validate", validate)
     graph.add_node("save_output", save_output)
@@ -119,7 +113,6 @@ def build_graph() -> StateGraph:
     graph.add_conditional_edges("present_summary", route_after_summary)
     graph.add_conditional_edges("generate_script", route_after_script)
     graph.add_conditional_edges("run_preview", route_after_preview_run)
-    graph.add_conditional_edges("present_preview", route_after_preview_approval)
     graph.add_conditional_edges("run_full_generation", route_after_full_gen)
     graph.add_conditional_edges("validate", route_after_validation)
 
