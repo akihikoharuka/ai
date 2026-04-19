@@ -32,28 +32,36 @@ def main():
     print("Frontend: http://localhost:8501")
     print("Press Ctrl+C to stop both services.\n")
 
-    procs = []
     try:
         backend = subprocess.Popen(backend_cmd, cwd=ROOT_DIR)
-        procs.append(backend)
         time.sleep(2)  # Give backend time to start
 
         frontend = subprocess.Popen(frontend_cmd, cwd=ROOT_DIR)
-        procs.append(frontend)
 
-        # Wait for either process to exit
         while True:
-            for p in procs:
-                if p.poll() is not None:
-                    raise KeyboardInterrupt
+            # If Streamlit dies there's nothing left to show — stop everything.
+            if frontend.poll() is not None:
+                print("\nStreamlit exited. Shutting down...")
+                backend.terminate()
+                backend.wait(timeout=5)
+                break
+
+            # If the backend dies, restart it without touching Streamlit.
+            if backend.poll() is not None:
+                print("\nBackend exited unexpectedly — restarting...")
+                backend = subprocess.Popen(backend_cmd, cwd=ROOT_DIR)
+                time.sleep(2)
+
             time.sleep(1)
 
     except KeyboardInterrupt:
         print("\nShutting down...")
-        for p in procs:
-            p.terminate()
-        for p in procs:
-            p.wait(timeout=5)
+        for p in (backend, frontend):
+            try:
+                p.terminate()
+                p.wait(timeout=5)
+            except Exception:
+                pass
         print("Stopped.")
 
 

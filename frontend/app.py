@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 import requests
 import streamlit as st
 
@@ -138,9 +136,28 @@ with left_col:
     st.markdown("---")
     st.markdown(f"**Status:** {phase_labels.get(phase, phase)}")
 
-# Polling logic
-if st.session_state.get("polling") and st.session_state.get("session_id"):
-    time.sleep(2)
+# Manual refresh button — helps when the user wants an immediate re-sync.
+with left_col:
+    if st.session_state.get("session_id") and phase not in ("upload", "complete"):
+        if st.button("🔄 Refresh status", use_container_width=True, key="refresh_status"):
+            st.session_state.polling = True
+            st.session_state.poll_error_count = 0
+            poll_status()
+            st.rerun()
+
+
+# Auto-polling via st.fragment — this is the Streamlit-native way to do
+# background refresh. The fragment runs on its own timer without re-executing
+# the whole script, which keeps the WebSocket stable during long operations.
+@st.fragment(run_every="3s")
+def _poll_fragment():
+    if not st.session_state.get("polling") or not st.session_state.get("session_id"):
+        return
     changed = poll_status()
-    if changed or st.session_state.get("polling"):
-        st.rerun()
+    if changed:
+        # Phase changed or an interrupt arrived — rerun the whole app so every
+        # panel (sidebar, preview, chatbot) picks up the new state.
+        st.rerun(scope="app")
+
+
+_poll_fragment()

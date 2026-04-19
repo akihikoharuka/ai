@@ -69,20 +69,42 @@ def render_sidebar():
                 except Exception:
                     pass
 
-    # Download section
-    full_paths = st.session_state.get("full_data_paths") or {}
-    if full_paths:
+    # Export section — dropdown enabled once validation completes.
+    # Decoupled from preview: shows up as soon as tables are known, greyed out
+    # until the full dataset is generated and validated.
+    if st.session_state.get("session_id"):
         st.markdown("---")
-        st.markdown("### Download")
-        session_id = st.session_state.session_id
+        st.markdown("### Export Data")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            csv_url = api_client.download_all_url(session_id, "csv")
-            st.markdown(f"[Download All (CSV)]({csv_url})")
-        with col2:
-            parquet_url = api_client.download_all_url(session_id, "parquet")
-            st.markdown(f"[Download All (Parquet)]({parquet_url})")
+        full_paths = st.session_state.get("full_data_paths") or {}
+        phase = st.session_state.get("phase", "")
+        validation_done = st.session_state.get("validation_result") is not None
+        export_ready = bool(full_paths) and (phase == "complete" or validation_done)
+
+        format_label = st.selectbox(
+            "Format",
+            ["CSV", "Parquet"],
+            key="export_format",
+            disabled=not export_ready,
+            help=None if export_ready else "Available after data generation and validation complete",
+        )
+
+        if export_ready:
+            session_id = st.session_state.session_id
+            fmt = "csv" if format_label == "CSV" else "parquet"
+            url = api_client.download_all_url(session_id, fmt)
+            st.link_button(
+                f"⬇️ Export All as {format_label}",
+                url,
+                use_container_width=True,
+            )
+        else:
+            st.button(
+                "⬇️ Export All",
+                disabled=True,
+                use_container_width=True,
+                help="Available after data generation and validation complete",
+            )
 
     # New session button
     if st.session_state.get("session_id"):

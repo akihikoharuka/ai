@@ -36,6 +36,12 @@ def parse_schema(state: SyntheticDataState) -> dict:
             len(tables),
             " -> ".join(generation_order),
         )
+
+        if not tables:
+            # Valid SQL syntax but no tables found — treat as plain-English description
+            logger.info("parse_schema: SQL parsed but 0 tables found, falling back to LLM inference")
+            return _infer_schema_from_text(state)
+
         return {
             "parsed_tables": parsed,
             "generation_order": generation_order,
