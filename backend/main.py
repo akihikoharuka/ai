@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Ensure the package root is on sys.path when running this file directly.
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import logging
 
 from fastapi import FastAPI
@@ -36,6 +44,11 @@ logger.info(
     settings.output_dir,
     settings.log_file,
 )
+
+
+@app.get("/")
+async def root():
+    return {"message": "Synthetic Data Generator backend is running", "api_base": "/api"}
 
 
 @app.get("/health")
