@@ -2,9 +2,9 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    llm_model: str = "gpt-5.4"
+    llm_model: str = "gpt-4"
     llm_base_url: str = "https://api.openai.com/v1"
-    llm_api_key: str = ""
+    openai_api_key: str = ""
     max_script_retries: int = 3
     max_validation_retries: int = 2
     preview_row_count: int = 20
@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        env_prefix = ""
         extra = "ignore"
 
 
