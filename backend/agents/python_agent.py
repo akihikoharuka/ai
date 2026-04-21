@@ -80,7 +80,7 @@ def generate_script(state: SyntheticDataState) -> dict:
 
     llm = ChatOpenAI(
         model=settings.llm_model,
-        api_key=settings.llm_api_key,
+        api_key=settings.openai_api_key,
         base_url=settings.llm_base_url,
         max_tokens=8192,
     )
@@ -134,56 +134,53 @@ def run_preview(state: SyntheticDataState) -> dict:
             "messages": [AIMessage(content=f"Script error: {result.error}. Fixing and retrying...")],
         }
 
-    # Read preview CSVs into preview_data.
-    # Primary: use generation_order so table ordering is preserved.
-    # Fallback: scan the output directory for any CSVs the script produced
-    # (handles the case where generation_order is empty or a table name differs).
-    # CSV read errors are non-fatal — the preview step must never block the
-    # downstream full-generation / validation / export flow.
+    # Read preview CSVs into preview_data
     preview_data = {}
     for table_name in state["generation_order"]:
         csv_path = os.path.join(preview_dir, f"{table_name}.csv")
         if os.path.exists(csv_path):
-            try:
-                df = pd.read_csv(csv_path, nrows=settings.preview_row_count)
-                preview_data[table_name] = df.to_dict(orient="records")
-            except Exception as e:
-                logger.warning("run_preview: failed to read %s — %s", csv_path, e)
-
-    if not preview_data:
-        # Fallback: pick up any CSVs written by the script that we didn't expect
-        try:
-            for fname in os.listdir(preview_dir):
-                if fname.endswith(".csv") and not fname.startswith("_"):
-                    table_name = fname[:-4]
-                    csv_path = os.path.join(preview_dir, fname)
-                    try:
-                        df = pd.read_csv(csv_path, nrows=settings.preview_row_count)
-                        preview_data[table_name] = df.to_dict(orient="records")
-                    except Exception as e:
-                        logger.warning("run_preview: failed to read %s — %s", csv_path, e)
-        except Exception as e:
-            logger.warning("run_preview: failed to scan output dir — %s", e)
-
-        if preview_data:
-            logger.warning(
-                "run_preview: generation_order was empty/mismatched — "
-                "discovered tables from output dir: %s",
-                list(preview_data.keys()),
-            )
+            df = pd.read_csv(csv_path, nrows=settings.preview_row_count)
+            preview_data[table_name] = df.to_dict(orient="records")
 
     logger.info("run_preview: complete — tables previewed: %s", list(preview_data.keys()))
-    # Decoupled flow: advance straight to full generation. The preview data is
-    # still in state so the UI can show sample rows while the full run happens.
     return {
         "preview_data": preview_data,
         "script_error": "",
-        "phase": Phase.GENERATING_FULL,
-        "messages": [AIMessage(
-            content=f"Preview generated with {settings.preview_row_count} rows per table. "
-                    f"Proceeding to full data generation..."
-        )],
+        "phase": Phase.AWAITING_PREVIEW_APPROVAL,
+        "messages": [AIMessage(content=f"Preview generated with {settings.preview_row_count} rows per table. Please review the data.")],
     }
+
+
+def present_preview(state: SyntheticDataState) -> dict:
+    """Present preview data and wait for user approval via interrupt."""
+    from langgraph.types import interrupt
+
+    preview_data = state.get("preview_data", {})
+
+    # Build preview summary
+    msg = "## Data Preview\n\n"
+    for table_name, rows in preview_data.items():
+        msg += f"**{table_name}**: {len(rows)} sample rows\n"
+
+    msg += "\nDo you approve this preview? Say 'yes' to generate the full dataset, or provide feedback for changes."
+
+    user_response = interrupt({"type": "preview_approval", "message": msg, "preview_data": preview_data})
+
+    approval_keywords = {"yes", "approve", "ok", "go", "proceed", "looks good", "lgtm", "generate", "sure"}
+    is_approved = any(kw in user_response.lower() for kw in approval_keywords)
+
+    if is_approved:
+        return {
+            "phase": Phase.GENERATING_FULL,
+            "messages": [AIMessage(content="Generating full dataset...")],
+        }
+    else:
+        return {
+            "script_error": f"User feedback: {user_response}",
+            "script_retry_count": 0,
+            "phase": Phase.GENERATING_SCRIPT,
+            "messages": [AIMessage(content="Revising the script based on your feedback...")],
+        }
 
 
 def run_full_generation(state: SyntheticDataState) -> dict:
