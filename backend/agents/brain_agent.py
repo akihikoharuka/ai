@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 def parse_schema(state: SyntheticDataState) -> dict:
     """Phase 1: Parse schema input — SQL DDL or plain English description."""
+    print("--- BRAIN IS THINKING ---")
     raw_ddl = state["raw_ddl"]
     logger.info("parse_schema: input received (%d chars)", len(raw_ddl))
 
@@ -36,12 +37,6 @@ def parse_schema(state: SyntheticDataState) -> dict:
             len(tables),
             " -> ".join(generation_order),
         )
-
-        if not tables:
-            # Valid SQL syntax but no tables found — treat as plain-English description
-            logger.info("parse_schema: SQL parsed but 0 tables found, falling back to LLM inference")
-            return _infer_schema_from_text(state)
-
         return {
             "parsed_tables": parsed,
             "generation_order": generation_order,
@@ -61,7 +56,7 @@ def _infer_schema_from_text(state: SyntheticDataState) -> dict:
 
     llm = ChatOpenAI(
         model=settings.llm_model,
-        api_key=settings.llm_api_key,
+        api_key=settings.openai_api_key,
         base_url=settings.llm_base_url,
         max_tokens=4096,
     )
@@ -125,6 +120,7 @@ def _infer_schema_from_text(state: SyntheticDataState) -> dict:
 
 def analyze_schema(state: SyntheticDataState) -> dict:
     """Phase 2 (LLM): Semantic analysis of schema columns."""
+    print("--- BRAIN IS THINKING ---")
     parsed_tables = state["parsed_tables"]
     generation_order = state["generation_order"]
     user_answers = state.get("user_answers") or {}
@@ -150,7 +146,7 @@ def analyze_schema(state: SyntheticDataState) -> dict:
 
     llm = ChatOpenAI(
         model=settings.llm_model,
-        api_key=settings.llm_api_key,
+        api_key=settings.openai_api_key,
         base_url=settings.llm_base_url,
         max_tokens=4096,
     )
