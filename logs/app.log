@@ -1,0 +1,2 @@
+2026-04-21 22:16:35 [INFO] backend.main: Synthetic Data Generator starting — model=gpt-5.4, output_dir=output, log_file=logs/app.log
+2026-04-21 22:19:30 [INFO] backend.main: Synthetic Data Generator starting — model=gpt-5.4, output_dir=output, log_file=logs/app.log
