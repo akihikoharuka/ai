@@ -10,8 +10,7 @@ from langgraph.graph import END, StateGraph
 from backend.agents.brain_agent import analyze_schema, parse_schema, present_summary
 from backend.agents.python_agent import (
     generate_script,
-    run_full_generation,
-    run_preview,
+    run_preview_and_full_generation,
 )
 from backend.agents.state import Phase, SyntheticDataState
 from backend.agents.validator_agent import save_output, validate
@@ -42,39 +41,23 @@ def route_after_summary(
 
 def route_after_script(
     state: SyntheticDataState,
-) -> Literal["run_preview", "generate_script", "__end__"]:
+) -> Literal["run_preview_and_full_generation", "generate_script", "__end__"]:
     """Route after script generation."""
     if state.get("phase") == Phase.ERROR:
         return END
     if state.get("script_error"):
         return "generate_script"  # Self-heal
-    return "run_preview"
+    return "run_preview_and_full_generation"
 
 
-def route_after_preview_run(
-    state: SyntheticDataState,
-) -> Literal["run_full_generation", "generate_script", "__end__"]:
-    """Route after running preview.
-
-    Preview is now decoupled: after a successful preview run we go straight to
-    full generation without a human checkpoint. The preview data stays in state
-    so the UI can display it alongside the full run.
-    """
-    if state.get("phase") == Phase.ERROR:
-        return END
-    if state.get("phase") == Phase.GENERATING_SCRIPT:
-        return "generate_script"  # Script failed, self-heal
-    return "run_full_generation"
-
-
-def route_after_full_gen(
+def route_after_parallel_gen(
     state: SyntheticDataState,
 ) -> Literal["validate", "generate_script", "__end__"]:
-    """Route after full data generation."""
+    """Route after parallel preview and full generation."""
     if state.get("phase") == Phase.ERROR:
         return END
-    if state.get("phase") == Phase.GENERATING_SCRIPT:
-        return "generate_script"
+    if state.get("full_generation_error"):
+        return "generate_script"  # Retry if full gen failed
     return "validate"
 
 
@@ -99,8 +82,7 @@ def build_graph() -> StateGraph:
     graph.add_node("analyze_schema", analyze_schema)
     graph.add_node("present_summary", present_summary)
     graph.add_node("generate_script", generate_script)
-    graph.add_node("run_preview", run_preview)
-    graph.add_node("run_full_generation", run_full_generation)
+    graph.add_node("run_preview_and_full_generation", run_preview_and_full_generation)
     graph.add_node("validate", validate)
     graph.add_node("save_output", save_output)
 
@@ -112,8 +94,7 @@ def build_graph() -> StateGraph:
     graph.add_conditional_edges("analyze_schema", route_after_analysis)
     graph.add_conditional_edges("present_summary", route_after_summary)
     graph.add_conditional_edges("generate_script", route_after_script)
-    graph.add_conditional_edges("run_preview", route_after_preview_run)
-    graph.add_conditional_edges("run_full_generation", route_after_full_gen)
+    graph.add_conditional_edges("run_preview_and_full_generation", route_after_parallel_gen)
     graph.add_conditional_edges("validate", route_after_validation)
 
     # save_output always ends

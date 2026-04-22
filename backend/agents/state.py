@@ -71,6 +71,12 @@ class SyntheticDataState(TypedDict):
     preview_data: dict[str, list[dict]]  # {table_name: [{row_dict}, ...]}
     full_data_paths: dict[str, str]  # {table_name: file_path}
 
+    # Parallel execution tracking
+    preview_running: bool
+    full_generation_running: bool
+    preview_error: str | None
+    full_generation_error: str | None
+
     # Validator output
     validation_result: Optional[ValidationResult]
     validation_retry_count: int

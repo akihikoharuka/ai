@@ -136,10 +136,10 @@ async def test_graph_runs_to_completion_with_mocked_llm(tmp_path, monkeypatch):
     # Point the output dir at a tmp location so we don't pollute the real one
     monkeypatch.setattr("backend.config.settings.output_dir", str(tmp_path))
 
-    # Mock ChatOpenAI.invoke wherever it's used
-    with patch("backend.agents.brain_agent.ChatOpenAI") as brain_llm_cls, \
-         patch("backend.agents.python_agent.ChatOpenAI") as py_llm_cls, \
-         patch("backend.agents.validator_agent.ChatOpenAI", create=True) as val_llm_cls:
+    # Mock AzureChatOpenAI.invoke wherever it's used
+    with patch("backend.agents.brain_agent.AzureChatOpenAI") as brain_llm_cls, \
+         patch("backend.agents.python_agent.AzureChatOpenAI") as py_llm_cls, \
+         patch("backend.agents.validator_agent.AzureChatOpenAI", create=True) as val_llm_cls:
         fake = MagicMock()
         fake.invoke.side_effect = _fake_llm_invoke
         brain_llm_cls.return_value = fake
@@ -167,6 +167,8 @@ async def test_graph_runs_to_completion_with_mocked_llm(tmp_path, monkeypatch):
             "validation_retry_count": 0,
             "phase": "upload",
             "error_message": "",
+            "preview_error": None,
+            "full_generation_error": None,
         }
 
         # Hard timeout — if the graph hangs we want a fast failure, not a test
@@ -192,13 +194,9 @@ async def test_graph_runs_to_completion_with_mocked_llm(tmp_path, monkeypatch):
         print(f"\nNodes executed (in order): {node_names}")
         print(f"Final phase: {final_state.values.get('phase')}")
 
-        # The critical assertion: we must have executed run_preview AND what
-        # comes after it (run_full_generation → validate → save_output).
-        assert "run_preview" in node_names, "run_preview never ran"
-        assert "run_full_generation" in node_names, (
-            "run_full_generation never ran — graph hung after run_preview "
-            "(this is the production bug)"
-        )
+        # The critical assertion: we must have executed run_preview_and_full_generation AND what
+        # comes after it (validate → save_output).
+        assert "run_preview_and_full_generation" in node_names, "run_preview_and_full_generation never ran"
         assert "validate" in node_names, "validate never ran"
         assert "save_output" in node_names, "save_output never ran"
 

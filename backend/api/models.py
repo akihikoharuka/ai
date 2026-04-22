@@ -32,3 +32,5 @@ class StatusResponse(BaseModel):
     validation_result: dict | None = None
     interrupt_data: dict | None = None
     error_message: str | None = None
+    preview_error: str | None = None
+    full_generation_error: str | None = None

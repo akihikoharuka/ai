@@ -175,6 +175,8 @@ async def get_status(session_id: str):
         validation_result=values.get("validation_result"),
         interrupt_data=interrupt_data,
         error_message=values.get("error_message"),
+        preview_error=values.get("preview_error"),
+        full_generation_error=values.get("full_generation_error"),
     )
 
 

@@ -6,7 +6,7 @@ import json
 import logging
 
 from langchain_core.messages import AIMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from langchain_openai import AzureChatOpenAI
 
 from backend.agents.prompts import BRAIN_AGENT_ANALYSIS_PROMPT, PLAIN_ENGLISH_TO_SCHEMA_PROMPT
 from backend.agents.state import Phase, SyntheticDataState
@@ -59,10 +59,11 @@ def _infer_schema_from_text(state: SyntheticDataState) -> dict:
     """Use the LLM to turn a plain-English description into a structured schema."""
     raw_input = state["raw_ddl"]
 
-    llm = ChatOpenAI(
-        model=settings.llm_model,
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url,
+    llm = AzureChatOpenAI(
+        azure_endpoint=settings.azure_openai_endpoint,
+        azure_deployment=settings.llm_model,
+        api_key=settings.azure_openai_api_key,
+        api_version=settings.azure_openai_api_version,
         max_tokens=4096,
     )
 
@@ -148,10 +149,11 @@ def analyze_schema(state: SyntheticDataState) -> dict:
         user_context=user_context,
     )
 
-    llm = ChatOpenAI(
-        model=settings.llm_model,
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url,
+    llm = AzureChatOpenAI(
+        azure_endpoint=settings.azure_openai_endpoint,
+        azure_deployment=settings.llm_model,
+        api_key=settings.azure_openai_api_key,
+        api_version=settings.azure_openai_api_version,
         max_tokens=4096,
     )
 

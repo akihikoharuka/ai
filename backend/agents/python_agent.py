@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -9,7 +10,7 @@ import re
 
 import pandas as pd
 from langchain_core.messages import AIMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from langchain_openai import AzureChatOpenAI
 
 from backend.agents.prompts import (
     PYTHON_AGENT_GENERATION_PROMPT,
@@ -78,10 +79,11 @@ def generate_script(state: SyntheticDataState) -> dict:
             error_context="",
         )
 
-    llm = ChatOpenAI(
-        model=settings.llm_model,
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url,
+    llm = AzureChatOpenAI(
+        azure_endpoint=settings.azure_openai_endpoint,
+        azure_deployment=settings.llm_model,
+        api_key=settings.azure_openai_api_key,
+        api_version=settings.azure_openai_api_version,
         max_tokens=8192,
     )
 
@@ -103,133 +105,105 @@ def generate_script(state: SyntheticDataState) -> dict:
         "generated_script": script,
         "script_error": "",
         "phase": Phase.GENERATING_SCRIPT,
-        "messages": [AIMessage(content="Script generated. Running preview...")],
+        "messages": [AIMessage(content="Script generated. Running preview and full generation...")],
     }
 
 
-def run_preview(state: SyntheticDataState) -> dict:
+def run_preview(script: str, preview_dir: str) -> object:
     """Run the generated script with a small row count for preview."""
+    logger.info(
+        "run_preview: starting preview run — output_dir=%s row_count=%d",
+        preview_dir,
+        settings.preview_row_count,
+    )
+    return run_script(script, preview_dir, row_count=settings.preview_row_count)
+
+
+def run_full_generation(script: str, final_dir: str) -> object:
+    """Run the generated script for the full dataset."""
+    logger.info("run_full_generation: starting full generation — output_dir=%s", final_dir)
+    return run_script(script, final_dir)
+
+
+async def run_preview_and_full_generation_async(script: str, preview_dir: str, final_dir: str, row_counts: dict, session_id: str):
+    """Run preview and full generation concurrently."""
+    preview_task = asyncio.to_thread(run_preview, script, preview_dir)
+    full_task = asyncio.to_thread(run_full_generation, script, final_dir)
+
+    logger.info(
+        "run_preview_and_full_generation_async: launched preview and full generation tasks for session=%s",
+        session_id,
+    )
+
+    preview_result, full_result = await asyncio.gather(preview_task, full_task)
+    return preview_result, full_result
+
+
+def run_preview_and_full_generation(state: SyntheticDataState) -> dict:
+    """Run preview and full generation in parallel."""
     script = state["generated_script"]
     session_id = state["session_id"]
-    retry_count = state.get("script_retry_count", 0)
+    row_counts = state.get("row_counts", {})
 
     preview_dir = os.path.abspath(os.path.join(settings.output_dir, session_id, "preview"))
-    logger.info("run_preview: session=%s row_count=%d", session_id, settings.preview_row_count)
-    result = run_script(script, preview_dir, row_count=settings.preview_row_count)
+    final_dir = os.path.abspath(os.path.join(settings.output_dir, session_id, "final"))
 
-    if not result.success:
-        logger.error("run_preview: script failed (attempt %d) — %s", retry_count + 1, result.error)
-        if retry_count >= settings.max_script_retries:
-            return {
-                "script_error": result.error,
-                "script_retry_count": retry_count + 1,
-                "phase": Phase.ERROR,
-                "error_message": f"Script failed after {retry_count + 1} attempts: {result.error}",
-                "messages": [AIMessage(content=f"Script failed after multiple attempts. Last error: {result.error}")],
-            }
+    logger.info("run_preview_and_full_generation: starting parallel runs for session=%s", session_id)
+
+    # Run both asynchronously
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        preview_result, full_result = loop.run_until_complete(
+            run_preview_and_full_generation_async(script, preview_dir, final_dir, row_counts, session_id)
+        )
+    finally:
+        loop.close()
+
+    # Handle preview results
+    preview_data = {}
+    if preview_result.success:
+        # Read preview CSVs
+        for table_name in state["generation_order"]:
+            csv_path = os.path.join(preview_dir, f"{table_name}.csv")
+            if os.path.exists(csv_path):
+                try:
+                    df = pd.read_csv(csv_path, nrows=settings.preview_row_count)
+                    preview_data[table_name] = df.to_dict(orient="records")
+                except Exception as e:
+                    logger.warning("run_preview_and_full_generation: failed to read preview %s — %s", csv_path, e)
+    else:
+        logger.error("run_preview_and_full_generation: preview failed — %s", preview_result.error)
+
+    # Handle full generation results
+    full_data_paths = {}
+    if full_result.success:
+        for table_name in state["generation_order"]:
+            csv_path = os.path.join(final_dir, f"{table_name}.csv")
+            if os.path.exists(csv_path):
+                full_data_paths[table_name] = csv_path
+    else:
+        logger.error("run_preview_and_full_generation: full generation failed — %s", full_result.error)
+
+    # Determine next phase
+    if not full_result.success:
         return {
-            "script_error": result.error,
-            "script_retry_count": retry_count + 1,
-            "phase": Phase.GENERATING_SCRIPT,
-            "messages": [AIMessage(content=f"Script error: {result.error}. Fixing and retrying...")],
+            "preview_data": preview_data,
+            "full_data_paths": full_data_paths,
+            "preview_error": preview_result.error if not preview_result.success else None,
+            "full_generation_error": full_result.error,
+            "phase": Phase.GENERATING_SCRIPT,  # Retry
+            "messages": [AIMessage(content=f"Full generation failed: {full_result.error}. Retrying...")],
         }
 
-    # Read preview CSVs into preview_data.
-    # Primary: use generation_order so table ordering is preserved.
-    # Fallback: scan the output directory for any CSVs the script produced
-    # (handles the case where generation_order is empty or a table name differs).
-    # CSV read errors are non-fatal — the preview step must never block the
-    # downstream full-generation / validation / export flow.
-    preview_data = {}
-    for table_name in state["generation_order"]:
-        csv_path = os.path.join(preview_dir, f"{table_name}.csv")
-        if os.path.exists(csv_path):
-            try:
-                df = pd.read_csv(csv_path, nrows=settings.preview_row_count)
-                preview_data[table_name] = df.to_dict(orient="records")
-            except Exception as e:
-                logger.warning("run_preview: failed to read %s — %s", csv_path, e)
-
-    if not preview_data:
-        # Fallback: pick up any CSVs written by the script that we didn't expect
-        try:
-            for fname in os.listdir(preview_dir):
-                if fname.endswith(".csv") and not fname.startswith("_"):
-                    table_name = fname[:-4]
-                    csv_path = os.path.join(preview_dir, fname)
-                    try:
-                        df = pd.read_csv(csv_path, nrows=settings.preview_row_count)
-                        preview_data[table_name] = df.to_dict(orient="records")
-                    except Exception as e:
-                        logger.warning("run_preview: failed to read %s — %s", csv_path, e)
-        except Exception as e:
-            logger.warning("run_preview: failed to scan output dir — %s", e)
-
-        if preview_data:
-            logger.warning(
-                "run_preview: generation_order was empty/mismatched — "
-                "discovered tables from output dir: %s",
-                list(preview_data.keys()),
-            )
-
-    logger.info("run_preview: complete — tables previewed: %s", list(preview_data.keys()))
-    # Decoupled flow: advance straight to full generation. The preview data is
-    # still in state so the UI can show sample rows while the full run happens.
+    logger.info("run_preview_and_full_generation: complete — preview tables: %s, full tables: %s", list(preview_data.keys()), list(full_data_paths.keys()))
     return {
         "preview_data": preview_data,
-        "script_error": "",
-        "phase": Phase.GENERATING_FULL,
-        "messages": [AIMessage(
-            content=f"Preview generated with {settings.preview_row_count} rows per table. "
-                    f"Proceeding to full data generation..."
-        )],
-    }
-
-
-def run_full_generation(state: SyntheticDataState) -> dict:
-    """Run the script with full row counts."""
-    script = state["generated_script"]
-    session_id = state["session_id"]
-    retry_count = state.get("script_retry_count", 0)
-
-    final_dir = os.path.abspath(os.path.join(settings.output_dir, session_id, "final"))
-    row_counts = state.get("row_counts", {})
-    logger.info(
-        "run_full_generation: session=%s row_counts=%s",
-        session_id,
-        {t: row_counts.get(t) for t in state.get("generation_order", [])},
-    )
-    result = run_script(script, final_dir)
-
-    if not result.success:
-        logger.error("run_full_generation: failed (attempt %d) — %s", retry_count + 1, result.error)
-        if retry_count >= settings.max_script_retries:
-            return {
-                "script_error": result.error,
-                "phase": Phase.ERROR,
-                "error_message": f"Full generation failed: {result.error}",
-                "messages": [AIMessage(content=f"Full generation failed: {result.error}")],
-            }
-        return {
-            "script_error": result.error,
-            "script_retry_count": retry_count + 1,
-            "phase": Phase.GENERATING_SCRIPT,
-            "messages": [AIMessage(content=f"Full generation error: {result.error}. Fixing...")],
-        }
-
-    # Record paths
-    full_data_paths = {}
-    for table_name in state["generation_order"]:
-        csv_path = os.path.join(final_dir, f"{table_name}.csv")
-        if os.path.exists(csv_path):
-            full_data_paths[table_name] = csv_path
-
-    logger.info("run_full_generation: complete — files: %s", list(full_data_paths.keys()))
-    return {
         "full_data_paths": full_data_paths,
-        "script_error": "",
+        "preview_error": None,
+        "full_generation_error": None,
         "phase": Phase.VALIDATING,
-        "messages": [AIMessage(content=f"Full dataset generated. Running validation...")],
+        "messages": [AIMessage(content="Preview and full data generated. Running validation...")],
     }
 
 
