@@ -131,7 +131,7 @@ PYTHON_AGENT_GENERATION_PROMPT = """You are a Python code generation expert. Gen
 
 ## Requirements
 1. The script must be completely self-contained — only use these imports:
-   `import pandas as pd, numpy as np, os, sys, json, csv, random, argparse`
+   `import pandas as pd, numpy as np, os, sys, json, csv, random, argparse, uuid`
    `from faker import Faker`
    `from datetime import datetime, timedelta, date`
 
@@ -141,20 +141,88 @@ PYTHON_AGENT_GENERATION_PROMPT = """You are a Python code generation expert. Gen
 
 3. Generate tables in this exact order: {generation_order}
 
-4. For FOREIGN KEY columns: Read the parent table's already-generated CSV and sample from its primary key column.
+4. For FOREIGN KEY columns: Read the parent table's already-generated CSV and sample from its primary key column using `np.random.choice(parent_ids, size=n)`.
 
-5. For UNIQUE columns: Ensure no duplicate values are generated.
+5. For UNIQUE columns: Ensure no duplicate values are generated (use `np.arange` for sequential IDs, `random.sample` for small unique sets).
 
 6. For NOT NULL columns: Never generate null/NaN values.
 
 7. For CHECK constraints: Respect the allowed values.
 
-8. Write each table to a CSV file named `<table_name>.csv` in the output directory.
+8. Write each table to a CSV file named `<table_name>.csv` in the output directory **in chunks of 100,000 rows** using `df.to_csv(path, mode='a' if chunk_start > 0 else 'w', header=(chunk_start == 0), index=False)`.
 
 9. At the end, print a JSON status to stdout:
    `{{"status": "success", "tables": {{"table_name": {{"rows": N, "file": "path"}}}}}}`
 
-10. Use `Faker('en_US')` and set seed with `Faker.seed(42)` and `random.seed(42)` and `np.random.seed(42)` for reproducibility.
+10. Set seeds: `Faker.seed(42)`, `random.seed(42)`, `np.random.seed(42)` for reproducibility.
+
+## PERFORMANCE REQUIREMENTS (CRITICAL — must follow for all row counts)
+
+**NEVER** use Faker or any Python loop to generate values row-by-row. This is 50–100x too slow for large datasets.
+
+### WRONG — Do NOT do this:
+```python
+rows = []
+for i in range(n):
+    rows.append({{"name": fake.name(), "age": fake.random_int(18, 80)}})
+df = pd.DataFrame(rows)
+df.to_csv(path, index=False)
+```
+
+### CORRECT — Always use vectorized numpy/pandas operations:
+```python
+FIRST_NAMES = ["James","Mary","John","Patricia","Robert","Jennifer","Michael","Linda",
+               "William","Barbara","David","Elizabeth","Richard","Susan","Joseph",
+               "Thomas","Charles","Jessica","Christopher","Sarah","Daniel","Karen"]
+LAST_NAMES  = ["Smith","Johnson","Williams","Brown","Jones","Garcia","Miller","Davis",
+               "Wilson","Taylor","Anderson","Thomas","Jackson","White","Harris",
+               "Martin","Thompson","Moore","Young","Allen","King","Wright","Scott"]
+DOMAINS = ["gmail.com","yahoo.com","hotmail.com","outlook.com","company.org","email.net"]
+
+first = np.random.choice(FIRST_NAMES, size=n)
+last  = np.random.choice(LAST_NAMES,  size=n)
+
+df = pd.DataFrame({{
+    "id":         np.arange(1, n + 1),
+    "name":       [f"{{f}} {{l}}" for f, l in zip(first, last)],
+    "email":      [f"{{f.lower()}}.{{l.lower()}}{{i % 9999}}@{{random.choice(DOMAINS)}}"
+                   for i, (f, l) in enumerate(zip(first, last))],
+    "age":        np.random.randint(18, 81, size=n),
+    "salary":     np.round(np.random.normal(60000, 15000, n).clip(25000, 200000), 2),
+    "status":     np.random.choice(["active","inactive","pending"], size=n, p=[0.6, 0.3, 0.1]),
+    "created_at": pd.to_datetime(
+                      np.random.randint(1577836800, 1735689600, size=n), unit="s"
+                  ),
+    "is_active":  np.random.choice([True, False], size=n, p=[0.8, 0.2]),
+    "uuid_col":   [str(uuid.uuid4()) for _ in range(n)],
+}})
+
+# Write in 100k-row chunks
+CHUNK = 100_000
+for start in range(0, n, CHUNK):
+    df.iloc[start:start + CHUNK].to_csv(
+        path, mode="a" if start > 0 else "w", header=(start == 0), index=False
+    )
+```
+
+### Vectorized recipe by data type:
+| Type | Correct approach |
+|---|---|
+| Sequential int ID | `np.arange(1, n+1)` |
+| Random int | `np.random.randint(low, high+1, size=n)` |
+| Float / normal dist | `np.random.normal(mean, std, n).clip(min, max)` |
+| Float / uniform | `np.random.uniform(low, high, n)` |
+| Categorical / enum | `np.random.choice(values, size=n)` or with weights `p=[...]` |
+| Name strings | pre-built lists + `np.random.choice` |
+| Email strings | list comprehension on numpy arrays (NOT `fake.email()` in loop) |
+| Date / timestamp | `pd.to_datetime(np.random.randint(ts_start, ts_end, n), unit='s')` |
+| Boolean | `np.random.choice([True, False], size=n)` |
+| UUID | `[str(uuid.uuid4()) for _ in range(n)]` |
+| FK values | `np.random.choice(parent_ids, size=n)` after loading parent CSV |
+| Phone number | `[f"{{np.random.randint(200,999)}}-{{np.random.randint(100,999)}}-{{np.random.randint(1000,9999)}}" for _ in range(n)]` |
+| ZIP code | `[f"{{np.random.randint(10000,99999):05d}}" for _ in range(n)]` |
+
+Only use `fake.xxx()` as a **last resort** for a field type with no vectorized alternative, and only inside a list comprehension (never a `for` loop with `.append()`).
 
 ## Reference Data
 The reference data directory is: {reference_data_dir}

@@ -119,16 +119,17 @@ def run_preview(script: str, preview_dir: str) -> object:
     return run_script(script, preview_dir, row_count=settings.preview_row_count)
 
 
-def run_full_generation(script: str, final_dir: str) -> object:
+def run_full_generation(script: str, final_dir: str, total_rows: int | None = None) -> object:
     """Run the generated script for the full dataset."""
-    logger.info("run_full_generation: starting full generation — output_dir=%s", final_dir)
-    return run_script(script, final_dir)
+    logger.info("run_full_generation: starting full generation — output_dir=%s total_rows=%s", final_dir, total_rows)
+    return run_script(script, final_dir, row_count=total_rows)
 
 
 async def run_preview_and_full_generation_async(script: str, preview_dir: str, final_dir: str, row_counts: dict, session_id: str):
     """Run preview and full generation concurrently."""
+    total_rows = sum(row_counts.values()) if row_counts else None
     preview_task = asyncio.to_thread(run_preview, script, preview_dir)
-    full_task = asyncio.to_thread(run_full_generation, script, final_dir)
+    full_task = asyncio.to_thread(run_full_generation, script, final_dir, total_rows)
 
     logger.info(
         "run_preview_and_full_generation_async: launched preview and full generation tasks for session=%s",
@@ -187,13 +188,26 @@ def run_preview_and_full_generation(state: SyntheticDataState) -> dict:
 
     # Determine next phase
     if not full_result.success:
+        current_retry = state.get("script_retry_count", 0)
+        if current_retry >= settings.max_script_retries:
+            return {
+                "preview_data": preview_data,
+                "full_data_paths": full_data_paths,
+                "preview_error": preview_result.error if not preview_result.success else None,
+                "full_generation_error": full_result.error,
+                "phase": Phase.ERROR,
+                "messages": [AIMessage(content=f"Full generation failed after {current_retry} retries: {full_result.error}")],
+            }
         return {
             "preview_data": preview_data,
             "full_data_paths": full_data_paths,
             "preview_error": preview_result.error if not preview_result.success else None,
             "full_generation_error": full_result.error,
-            "phase": Phase.GENERATING_SCRIPT,  # Retry
-            "messages": [AIMessage(content=f"Full generation failed: {full_result.error}. Retrying...")],
+            # Surface the error as script_error so the LLM gets self-healing context
+            "script_error": full_result.error,
+            "script_retry_count": current_retry + 1,
+            "phase": Phase.GENERATING_SCRIPT,
+            "messages": [AIMessage(content=f"Full generation failed: {full_result.error}. Retrying with fixes...")],
         }
 
     logger.info("run_preview_and_full_generation: complete — preview tables: %s, full tables: %s", list(preview_data.keys()), list(full_data_paths.keys()))

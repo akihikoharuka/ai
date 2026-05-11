@@ -22,6 +22,14 @@ class ScriptResult:
     tables_generated: dict[str, dict] | None = None  # {table_name: {rows, file}}
 
 
+def _compute_timeout(row_count: int | None) -> int:
+    """Scale timeout with row count: base + 30s per 100k rows."""
+    base = settings.script_timeout_seconds
+    if row_count and row_count > 10_000:
+        return base + (row_count // 100_000) * 30
+    return base
+
+
 def run_script(
     script: str,
     output_dir: str,
@@ -30,7 +38,7 @@ def run_script(
 ) -> ScriptResult:
     """Write script to temp file, execute in subprocess, return result."""
     if timeout is None:
-        timeout = settings.script_timeout_seconds
+        timeout = _compute_timeout(row_count)
 
     os.makedirs(output_dir, exist_ok=True)
 

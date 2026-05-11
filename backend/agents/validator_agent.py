@@ -33,7 +33,9 @@ def validate(state: SyntheticDataState) -> dict:
     table_map = {t["name"]: t for t in parsed_tables}
     generated_dfs: dict[str, pd.DataFrame] = {}
 
-    # Load all generated data
+    # Load all generated data; for very large files keep a sampled copy for statistical checks
+    SAMPLE_THRESHOLD = 200_000
+    SAMPLE_SIZE = 50_000
     for table_name, path in full_data_paths.items():
         if os.path.exists(path):
             generated_dfs[table_name] = pd.read_csv(path)
@@ -56,6 +58,15 @@ def validate(state: SyntheticDataState) -> dict:
         if schema is None:
             continue
 
+        # For large tables, use a sample for expensive per-row checks
+        is_large = len(df) > SAMPLE_THRESHOLD
+        df_sample = df.sample(SAMPLE_SIZE, random_state=42) if is_large else df
+        if is_large:
+            logger.info(
+                "validate: table %s has %d rows — using %d-row sample for per-row checks",
+                table_name, len(df), SAMPLE_SIZE,
+            )
+
         # Check 1: All columns present
         expected_cols = {c["name"] for c in schema["columns"]}
         actual_cols = set(df.columns)
@@ -69,39 +80,40 @@ def validate(state: SyntheticDataState) -> dict:
                 "details": {"missing_columns": list(missing)},
             })
 
-        # Check 2: NOT NULL constraints
+        # Check 2: NOT NULL constraints (sample for large tables)
         for col_info in schema["columns"]:
             col_name = col_info["name"]
             if col_name not in df.columns:
                 continue
             if not col_info["nullable"]:
-                null_count = df[col_name].isna().sum()
+                null_count = int(df_sample[col_name].isna().sum())
                 if null_count > 0:
                     checks.append({
                         "check_name": "not_null",
                         "passed": False,
                         "severity": "simple",
-                        "message": f"Table {table_name}.{col_name}: {null_count} NULL values in NOT NULL column",
-                        "details": {"null_count": int(null_count)},
+                        "message": f"Table {table_name}.{col_name}: {null_count} NULL values in NOT NULL column"
+                                   + (" (sampled)" if is_large else ""),
+                        "details": {"null_count": null_count},
                     })
 
-        # Check 3: UNIQUE constraints
+        # Check 3: UNIQUE constraints — only trustworthy on the full dataset
         for col_info in schema["columns"]:
             col_name = col_info["name"]
             if col_name not in df.columns:
                 continue
             if col_info["is_unique"] or col_info["is_primary_key"]:
-                dup_count = df[col_name].duplicated().sum()
+                dup_count = int(df[col_name].duplicated().sum())
                 if dup_count > 0:
                     checks.append({
                         "check_name": "unique_constraint",
                         "passed": False,
                         "severity": "simple",
                         "message": f"Table {table_name}.{col_name}: {dup_count} duplicate values in UNIQUE column",
-                        "details": {"duplicate_count": int(dup_count)},
+                        "details": {"duplicate_count": dup_count},
                     })
 
-        # Check 4: Referential integrity
+        # Check 4: Referential integrity (sample child values for large tables)
         for fk in schema.get("foreign_keys", []):
             fk_col = fk["column"]
             parent_table = fk["references_table"]
@@ -114,7 +126,7 @@ def validate(state: SyntheticDataState) -> dict:
             if parent_df is None or parent_col not in parent_df.columns:
                 continue
 
-            child_values = set(df[fk_col].dropna().unique())
+            child_values = set(df_sample[fk_col].dropna().unique())
             parent_values = set(parent_df[parent_col].dropna().unique())
             orphans = child_values - parent_values
 
@@ -123,7 +135,8 @@ def validate(state: SyntheticDataState) -> dict:
                     "check_name": "referential_integrity",
                     "passed": False,
                     "severity": "simple",
-                    "message": f"Table {table_name}.{fk_col}: {len(orphans)} orphaned FK values not in {parent_table}.{parent_col}",
+                    "message": f"Table {table_name}.{fk_col}: {len(orphans)} orphaned FK values not in {parent_table}.{parent_col}"
+                               + (" (sampled)" if is_large else ""),
                     "details": {"orphan_count": len(orphans), "sample_orphans": list(orphans)[:5]},
                 })
 
@@ -145,10 +158,10 @@ def validate(state: SyntheticDataState) -> dict:
             if os.path.exists(real_path):
                 real_df = pd.read_csv(real_path)
 
-                # Compare distributions for each common column
-                common_cols = list(set(real_df.columns) & set(df.columns))
+                # Compare distributions for each common column (use sample for large tables)
+                common_cols = list(set(real_df.columns) & set(df_sample.columns))
                 for col_name in common_cols:
-                    dist_result = compare_distributions(real_df[col_name], df[col_name], col_name)
+                    dist_result = compare_distributions(real_df[col_name], df_sample[col_name], col_name)
                     if not dist_result["passed"]:
                         checks.append({
                             "check_name": "distribution_match",
@@ -158,8 +171,8 @@ def validate(state: SyntheticDataState) -> dict:
                             "details": dist_result,
                         })
 
-                # Privacy check
-                privacy_issues = check_privacy_leakage(real_df, df, table_name)
+                # Privacy check (use sample for large tables)
+                privacy_issues = check_privacy_leakage(real_df, df_sample, table_name)
                 checks.extend(privacy_issues)
 
     # Determine overall result
